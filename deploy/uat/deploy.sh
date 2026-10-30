@@ -56,8 +56,8 @@ if [ "$(env_value FLEXPRICE_TEMPORAL_TLS)" = "true" ]; then
   TEMPORAL_TLS_FLAG="--tls"
 fi
 temporal_cli() {
-  timeout 60 docker run --rm $HOST_GATEWAY "$TEMPORAL_ADMIN_IMAGE" \
-    temporal --address "$TEMPORAL_ADDRESS" $TEMPORAL_TLS_FLAG "$@"
+  timeout 60 docker run --rm $HOST_GATEWAY --entrypoint temporal "$TEMPORAL_ADMIN_IMAGE" \
+    --address "$TEMPORAL_ADDRESS" $TEMPORAL_TLS_FLAG "$@"
 }
 if temporal_cli operator namespace describe --namespace "$TEMPORAL_NAMESPACE" >/dev/null 2>&1; then
   echo "Namespace $TEMPORAL_NAMESPACE already exists"
