@@ -18,6 +18,12 @@ env_value() {
   grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2-
 }
 
+# Optional: join a Docker network (e.g. Kafka's) so its containers resolve by name.
+DOCKER_NETWORK="$(env_value DEPLOY_DOCKER_NETWORK)"
+if [ -n "$DOCKER_NETWORK" ]; then
+  HOST_GATEWAY="$HOST_GATEWAY --network $DOCKER_NETWORK"
+fi
+
 run_once() {
   docker run --rm $HOST_GATEWAY --env-file "$ENV_FILE" "$@"
 }
