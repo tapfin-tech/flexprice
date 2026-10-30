@@ -55,14 +55,18 @@ TEMPORAL_TLS_FLAG=""
 if [ "$(env_value FLEXPRICE_TEMPORAL_TLS)" = "true" ]; then
   TEMPORAL_TLS_FLAG="--tls"
 fi
-if docker run --rm $HOST_GATEWAY "$TEMPORAL_ADMIN_IMAGE" temporal --address "$TEMPORAL_ADDRESS" $TEMPORAL_TLS_FLAG \
-    operator namespace describe --namespace "$TEMPORAL_NAMESPACE" >/dev/null 2>&1; then
+temporal_cli() {
+  timeout 60 docker run --rm $HOST_GATEWAY --entrypoint temporal "$TEMPORAL_ADMIN_IMAGE" \
+    --address "$TEMPORAL_ADDRESS" $TEMPORAL_TLS_FLAG "$@"
+}
+if temporal_cli operator namespace describe --namespace "$TEMPORAL_NAMESPACE" >/dev/null 2>&1; then
   echo "Namespace $TEMPORAL_NAMESPACE already exists"
-else
-  docker run --rm $HOST_GATEWAY "$TEMPORAL_ADMIN_IMAGE" temporal --address "$TEMPORAL_ADDRESS" $TEMPORAL_TLS_FLAG \
-    operator namespace create --namespace "$TEMPORAL_NAMESPACE" \
-    --retention "${TEMPORAL_RETENTION:-168h}" --description "Flexprice UAT"
+elif temporal_cli operator namespace create --namespace "$TEMPORAL_NAMESPACE" \
+    --retention "${TEMPORAL_RETENTION:-168h}" --description "Flexprice UAT"; then
   echo "Created namespace $TEMPORAL_NAMESPACE"
+else
+  echo "Cannot reach Temporal at $TEMPORAL_ADDRESS (or namespace create failed)"
+  exit 1
 fi
 
 replace_container() {
