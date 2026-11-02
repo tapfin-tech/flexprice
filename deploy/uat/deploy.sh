@@ -9,10 +9,19 @@ ENV_FILE="$2"
 API_PORT="$3"
 
 NAME_PREFIX="flexprice-uat"
+# Marks one-off containers so an aborted run can be cleaned up by label.
+ONEOFF_LABEL="$NAME_PREFIX.oneoff=true"
 PSQL_IMAGE="postgres:16-alpine"
 TEMPORAL_ADMIN_IMAGE="temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2"
 # Lets containers reach Postgres, Redis, ClickHouse, Kafka and Temporal published on this host.
 HOST_GATEWAY="--add-host=host.docker.internal:host-gateway"
+
+cleanup() {
+  docker ps -aq --filter "label=$ONEOFF_LABEL" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  rm -f "$ENV_FILE" "$0"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM HUP INT
 
 env_value() {
   grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2-
@@ -35,7 +44,7 @@ connect_extra_networks() {
 # Runs a one-off container to completion on all networks and returns its exit code.
 run_attached() {
   local id status=0
-  id="$(docker create $HOST_GATEWAY "$@")"
+  id="$(docker create --label "$ONEOFF_LABEL" $HOST_GATEWAY "$@")"
   connect_extra_networks "$id"
   timeout 300 docker start -a "$id" || status=$?
   docker rm -f "$id" >/dev/null 2>&1 || true
