@@ -4,6 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/flexprice/flexprice/internal/clock"
+
+	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
+
 	"github.com/flexprice/flexprice/internal/api/dto"
 	"github.com/flexprice/flexprice/internal/domain/commitment"
 	"github.com/flexprice/flexprice/internal/domain/price"
@@ -13,8 +18,6 @@ import (
 	"github.com/flexprice/flexprice/internal/types"
 	"github.com/flexprice/flexprice/internal/validator"
 	webhookDto "github.com/flexprice/flexprice/internal/webhook/dto"
-	"github.com/samber/lo"
-	"github.com/shopspring/decimal"
 )
 
 // CommitmentService manages first-class subscription commitments.
@@ -284,7 +287,8 @@ func (s *commitmentService) prepare(
 
 // scopeMeter returns the meter of the first scoped line at the commitment start, which backs its rate prices.
 func scopeMeter(c *commitment.Commitment, cc *commitmentContext) string {
-	lines := resolveScopeLines(c.ScopeEntityType, c.ScopeEntityID, cc, c.StartDate)
+	// Whole-second term edges can sit a fraction below mid-second line starts; resolve from whichever is later.
+	lines := resolveScopeLines(c.ScopeEntityType, c.ScopeEntityID, cc, maxTime(c.StartDate, cc.Sub.StartDate))
 	if len(lines) == 0 {
 		return ""
 	}
@@ -298,7 +302,7 @@ func bucketFor(c *commitment.Commitment, cc *commitmentContext) types.WindowSize
 		return ""
 	}
 
-	lines := resolveScopeLines(c.ScopeEntityType, c.ScopeEntityID, cc, c.StartDate)
+	lines := resolveScopeLines(c.ScopeEntityType, c.ScopeEntityID, cc, maxTime(c.StartDate, cc.Sub.StartDate))
 	if len(lines) == 0 {
 		return ""
 	}
@@ -452,7 +456,7 @@ func (s *commitmentService) Terminate(
 		return nil, err
 	}
 
-	effectiveAt := lo.FromPtrOr(req.EffectiveAt, time.Now().UTC())
+	effectiveAt := lo.FromPtrOr(req.EffectiveAt, clock.Now())
 	var out *commitment.Commitment
 	var invoiceID *string
 	err := s.DB.WithTx(ctx, func(txCtx context.Context) error {

@@ -6,6 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flexprice/flexprice/internal/clock"
+
+	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
+
 	"github.com/flexprice/flexprice/internal/activity"
 	"github.com/flexprice/flexprice/internal/api/dto"
 	"github.com/flexprice/flexprice/internal/domain/addonassociation"
@@ -17,8 +22,6 @@ import (
 	ierr "github.com/flexprice/flexprice/internal/errors"
 	"github.com/flexprice/flexprice/internal/idempotency"
 	"github.com/flexprice/flexprice/internal/types"
-	"github.com/samber/lo"
-	"github.com/shopspring/decimal"
 )
 
 type planChangeRequest struct {
@@ -85,6 +88,12 @@ func (s *subscriptionService) resolvePlanChange(
 		return nil, err
 	}
 
+	// Read before the prices so synced_price_sequence never claims a change the new line items missed.
+	targetSeq, err := s.PlanPriceSyncRepo.CurrentPlanSequence(ctx, toPlan.Plan.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Plan change v2 does not currently support caller-driven price selection —
 	// pass nil so the strict-equal default applies (matches historical behavior
 	// on this path).
@@ -120,9 +129,7 @@ func (s *subscriptionService) resolvePlanChange(
 	if err != nil {
 		return nil, err
 	}
-	if updatedSub.SyncedPriceSequence, err = s.PlanPriceSyncRepo.CurrentPlanSequence(ctx, r.toPlan.ID); err != nil {
-		return nil, err
-	}
+	updatedSub.SyncedPriceSequence = targetSeq
 	r.updatedSub = updatedSub
 
 	carriedLineItems, openingLineItems, closingLineItems, err := s.resolveLineItems(ctx, sub, targetPrices, toPlan, effectiveAt)
@@ -978,10 +985,14 @@ func (s *subscriptionService) loadSubscriptionForChange(
 
 func (s *subscriptionService) applyPlanChangeLineItems(ctx context.Context, r *planChangeRequest) error {
 	for _, move := range r.carriedLineItems {
-		updated := subscription.NewSubscriptionLineItemBuilder(move.LineItem).
+		builder := subscription.NewSubscriptionLineItemBuilder(move.LineItem).
 			WithPlan(r.toPlan.ID, r.toPlan.Name).
-			WithPrice(move.NewPrice).
-			Build()
+			WithPrice(move.NewPrice)
+		// A target price scheduled to end ends the line carried onto it
+		if move.NewPrice.EndDate != nil {
+			builder = builder.WithEndDate(*move.NewPrice.EndDate)
+		}
+		updated := builder.Build()
 
 		if err := s.SubscriptionLineItemRepo.Update(ctx, updated); err != nil {
 			return err
@@ -1003,7 +1014,12 @@ func (s *subscriptionService) applyPlanChangeLineItems(ctx context.Context, r *p
 	}
 	toCreate := make([]*subscription.SubscriptionLineItem, 0, len(r.openingLineItems))
 	for _, move := range r.openingLineItems {
-		toCreate = append(toCreate, move.LineItem)
+		item := move.LineItem
+		// A target price scheduled to end ends the line opened for it
+		if priceEnd := move.NewPrice.EndDate; priceEnd != nil && (item.EndDate.IsZero() || priceEnd.Before(item.EndDate)) {
+			item = subscription.NewSubscriptionLineItemBuilder(item).WithEndDate(*priceEnd).Build()
+		}
+		toCreate = append(toCreate, item)
 	}
 	return s.SubscriptionLineItemRepo.CreateBulk(ctx, toCreate)
 }
@@ -1468,7 +1484,7 @@ func (s *subscriptionService) ExecuteScheduledPlanChangeV2(
 	}
 
 	schedule.Status = types.ScheduleStatusExecuted
-	schedule.ExecutedAt = lo.ToPtr(time.Now().UTC())
+	schedule.ExecutedAt = lo.ToPtr(clock.Now())
 	if err := schedule.SetPlanChangeV2Result(&subscription.PlanChangeV2Result{
 		SubscriptionID: schedule.SubscriptionID,
 		FromPlanID:     resp.FromPlan.ID,
@@ -1495,7 +1511,7 @@ func (s *subscriptionService) failPlanChangeSchedule(
 	cause error,
 ) {
 	schedule.Status = types.ScheduleStatusFailed
-	schedule.ExecutedAt = lo.ToPtr(time.Now().UTC())
+	schedule.ExecutedAt = lo.ToPtr(clock.Now())
 	schedule.ErrorMessage = lo.ToPtr(cause.Error())
 
 	if err := s.SubScheduleRepo.Update(ctx, schedule); err != nil {
@@ -1567,7 +1583,7 @@ func (s *subscriptionService) resolvePendingPlanChangeSchedule(
 
 	superseded := subscription.NewSubscriptionScheduleBuilder(existing).
 		WithStatus(types.ScheduleStatusCancelled).
-		WithCancelledAt(time.Now().UTC()).
+		WithCancelledAt(clock.Now()).
 		WithUpdatedBy(types.GetUserID(ctx)).
 		Build()
 
@@ -1592,7 +1608,7 @@ func resolveEffectiveAt(sub *subscription.Subscription, req dto.SubscriptionChan
 		return sub.CurrentPeriodEnd
 	}
 
-	return time.Now().UTC()
+	return clock.Now()
 }
 
 // schedulePlanChangeForPeriodEnd records a deferred change.
