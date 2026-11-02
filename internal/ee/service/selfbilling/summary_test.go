@@ -16,7 +16,8 @@ func TestSummary_MapsSubscriptionAndInvoices(t *testing.T) {
 	s, d := newTestService(fc)
 	seedTenant(t, d, "t1", types.TenantInternalStatusTrialing)
 
-	end := time.Now().UTC().AddDate(0, 0, 30).Truncate(time.Second)
+	// A future trial end, relative so the test never expires with the calendar.
+	end := time.Now().UTC().Truncate(time.Second).AddDate(0, 0, 7)
 	fc.summaries["us:t1"] = &remoteSummary{
 		subscription: &remoteSubscription{
 			id:       "sub1",

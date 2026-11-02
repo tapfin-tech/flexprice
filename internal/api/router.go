@@ -1,6 +1,8 @@
 package api
 
 import (
+	"github.com/gin-gonic/gin"
+
 	"github.com/flexprice/flexprice/docs/swagger"
 	v1 "github.com/flexprice/flexprice/internal/api/v1"
 	"github.com/flexprice/flexprice/internal/config"
@@ -13,7 +15,6 @@ import (
 	"github.com/flexprice/flexprice/internal/rbac"
 	"github.com/flexprice/flexprice/internal/rest/middleware"
 	"github.com/flexprice/flexprice/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 type Handlers struct {
@@ -103,6 +104,9 @@ func NewRouter(
 	hostedInvoiceService service.HostedInvoiceService,
 ) *gin.Engine {
 	// gin.SetMode(gin.ReleaseMode)
+
+	// Process-global: also covers the admin engine and any future engine.
+	middleware.InstallMicrosecondBinding()
 
 	// Create a new gin engine without default middleware
 	router := gin.New()
@@ -288,6 +292,7 @@ func NewRouter(
 			price.POST("/bulk", write(types.EntityPrice, types.ActionWrite), handlers.Price.CreateBulkPrice)
 			price.GET("", observe(types.EntityPrice), handlers.Price.ListPrices)
 			price.GET("/:id", observe(types.EntityPrice), handlers.Price.GetPrice)
+			price.GET("/:id/history", observe(types.EntityPrice), handlers.Price.GetPriceHistory)
 			price.PUT("/:id", write(types.EntityPrice, types.ActionWrite), handlers.Price.UpdatePrice)
 			price.DELETE("/:id", write(types.EntityPrice, types.ActionWrite), handlers.Price.DeletePrice)
 			price.GET("/lookup/:lookup_key", observe(types.EntityPrice), handlers.Price.GetByLookupKey)
@@ -457,6 +462,7 @@ func NewRouter(
 
 			// Subscription line item management (POST /lineitems/search registered above)
 			subscription.POST("/:id/lineitems", write(types.EntitySubscription, types.ActionWrite), handlers.Subscription.AddSubscriptionLineItem)
+			subscription.GET("/lineitems/:id/history", observe(types.EntitySubscription), handlers.Subscription.GetSubscriptionLineItemHistory)
 			subscription.PUT("/lineitems/:id", write(types.EntitySubscription, types.ActionWrite), handlers.Subscription.UpdateSubscriptionLineItem)
 			subscription.DELETE("/lineitems/:id", write(types.EntitySubscription, types.ActionWrite), handlers.Subscription.DeleteSubscriptionLineItem)
 
