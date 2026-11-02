@@ -61,20 +61,22 @@ FROM ghcr.io/typst/typst:0.15.1 AS typst
 # Final stage
 FROM alpine:3.24
 RUN apk --no-cache add ca-certificates tzdata && \
-    addgroup -S app && adduser -S -G app app
+    addgroup -S app && adduser -S -G app app && \
+    install -d -o app -g app /app
 
 WORKDIR /app
-COPY --from=builder /app/server .
-COPY --from=builder /app/migrate .
-COPY --from=builder /app/migrations ./migrations
-COPY --from=builder /app/internal/config ./config
-COPY --from=builder /app/assets/fonts ./assets/fonts
-COPY --from=builder /app/assets/typst-templates ./assets/typst-templates
-COPY --from=builder /app/assets/email-templates ./assets/email-templates
+# Least-changing files first, so a code-only change rebuilds and pushes just the
+# last layers. --chown avoids a second full copy of /app from a later chown.
 COPY --from=typst /bin/typst /usr/local/bin/
 # `./migrate postgres up` execs this; keep it on PATH.
 COPY --from=dbmate /out/dbmate /usr/local/bin/dbmate
-RUN chown -R app:app /app
+COPY --chown=app:app --from=builder /app/assets/fonts ./assets/fonts
+COPY --chown=app:app --from=builder /app/assets/typst-templates ./assets/typst-templates
+COPY --chown=app:app --from=builder /app/assets/email-templates ./assets/email-templates
+COPY --chown=app:app --from=builder /app/internal/config ./config
+COPY --chown=app:app --from=builder /app/migrations ./migrations
+COPY --chown=app:app --from=builder /app/migrate .
+COPY --chown=app:app --from=builder /app/server .
 
 ENV TZ=UTC
 USER app
