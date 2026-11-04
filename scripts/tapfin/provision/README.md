@@ -117,61 +117,12 @@ emitted for both; each organisation is its own customer.
 ## Event contract: usage_event/v1 over Kafka
 
 The platform never talks to the billing vendor. Each source (data-insights,
-api-tapfin-ai, api-tara-ai) publishes a billing-neutral **usage event** to the
-Kafka topic `usage_events` (configurable per environment), keyed by the
-organisation code, and Flexprice's `platform_usage` consumer
-(`internal/platformusage`) ingests it for the configured tenant and
-environment. Swapping the billing platform means writing one new consumer.
-
-```json
-{
-  "version": 1,
-  "id": "evt_asset_taporsi8drj_tapas1_2026-11-03",
-  "name": "asset_billing_state",
-  "organization_code": "TAPORSI8DRJ",
-  "occurred_at": "2026-11-03T00:00:00+05:30",
-  "source": "data-insights",
-  "properties": {"asset_code": "TAP-AS1", "form_factor": "BATTERY", "state": "ACTIVE"}
-}
-```
-
-- `id` is stable per occurrence, so a redelivered message is not billed twice.
-- `name` is the meter's event name; `organization_code` is the customer's
-  external id; `occurred_at` is RFC 3339; `properties` is flat and its values
-  are compared as strings by the meters.
-
-Flexprice side: set `FLEXPRICE_PLATFORM_USAGE_ENABLED=true`,
-`FLEXPRICE_PLATFORM_USAGE_TENANT_ID`, `FLEXPRICE_PLATFORM_USAGE_ENVIRONMENT_ID`
-and, when the platform's Kafka is not Flexprice's own cluster,
-`FLEXPRICE_PLATFORM_USAGE_KAFKA_BROKERS` (plus `_USE_SASL`, `_SASL_MECHANISM`,
-`_SASL_USER`, `_SASL_PASSWORD`, `_TLS`). Malformed messages go to
-`usage_events_dlq`.
-
-Platform side: every source is off until `USAGE_EVENTS_ENABLED=true`
-(`USAGE_EVENTS_TOPIC` and `USAGE_EVENTS_SOURCE` are optional); api-tara-ai
-also needs `KAFKA_BOOTSTRAP_SERVERS` and the `KAFKA_SASL_*` settings since it
-had no Kafka client before.
-
-Event names and properties the rate card meters:
-
-- `asset_billing_state` – one event per asset per day (a daily snapshot).
-  Properties: `asset_code`, `form_factor` (`TWO_WHEELER` | `THREE_WHEELER` |
-  `FOUR_WHEELER` | `TRUCK` | `BUS` | `BATTERY`), `category` (`L3` | `L5`, three-wheelers
-  only), `state` (`ACTIVE` | `HIBERNATION`). The meter counts distinct
-  `asset_code` per month, so an asset seen in both states in one month is
-  billed once in each state.
-- `challan_fetch` – one event per fetch. Properties: `asset_code`,
-  `billable` (`"true"` | `"false"`). The emitter marks the first fetch of
-  each asset in a calendar month `"false"`; Flexprice bills only `"true"`.
-  Per-asset free quotas cannot be expressed as a plan tier, which is why the
-  emitter owns that rule.
-- `map_hit` – one event per map request. Properties: `provider`
-  (`google` | `osm`), `kind` (`geocode` | `reverse_geocode` | `directions`).
-  Only `google` is billed, per 1000 hits rounded up.
-- `tara_ai_usage` – one event per answered question. Properties: `tokens`
-  (number, total tokens for the call). Billed per 1,000,000 tokens, rounded up.
-- `tara_ai_mcp_usage` – one event per MCP tool call, `tokens` estimated from
-  the result size (`estimate: "chars/4"`). Not priced yet.
+api-tapfin-ai, api-tara-ai) publishes a billing-neutral usage event to the
+Kafka topic `usage_events`, keyed by the organisation code, and the
+`api-billing-broker` service delivers it to Flexprice over the public API.
+The envelope, the event names the rate card meters and the broker's settings
+are documented in that repository's README. This tool's `-emit-assets` writes
+the same `asset_billing_state` events straight to ClickHouse for backfill only.
 
 ## Running
 
