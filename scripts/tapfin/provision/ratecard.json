@@ -1,0 +1,69 @@
+{
+  "currency": "INR",
+  "three_wheeler_l5_models": ["HiLoad"],
+  "default": {
+    "label": "FleetForce standard",
+    "product": "FleetForce",
+    "asset_monthly": {
+      "TWO_WHEELER":   { "active": "40",  "hibernation": "5"  },
+      "THREE_WHEELER": { "active": "60",  "hibernation": "10" },
+      "FOUR_WHEELER":  { "active": "100", "hibernation": "10" }
+    },
+    "challan_fetch_per_unit": "3",
+    "challan_free_per_asset_per_month": 1,
+    "google_map_hits_package_amount": "100",
+    "google_map_hits_package_size": 1000,
+    "tara_ai_package_amount": "500",
+    "tara_ai_package_size": 1000000
+  },
+  "overrides": {
+    "TAPORSI8DRJ": {
+      "label": "TRUST – Accelerated Money for U",
+      "product": "TRUST",
+      "effective_from": "2026-07-15",
+      "asset_monthly": {
+        "BATTERY":          { "active": "65",  "hibernation": "10" },
+        "TWO_WHEELER":      { "active": "65",  "hibernation": "10" },
+        "THREE_WHEELER_L3": { "active": "80",  "hibernation": "10" },
+        "THREE_WHEELER_L5": { "active": "130", "hibernation": "10" },
+        "FOUR_WHEELER":     { "active": "165", "hibernation": "10" },
+        "BUS":              { "active": "250", "hibernation": "10" }
+      },
+      "revisions": [
+        {
+          "effective_from": "2026-11-01",
+          "asset_monthly": {
+            "BATTERY":          { "active": "65",  "hibernation": "10" },
+            "TWO_WHEELER":      { "active": "65",  "hibernation": "10" },
+            "THREE_WHEELER_L3": { "active": "100", "hibernation": "10" },
+            "THREE_WHEELER_L5": { "active": "145", "hibernation": "10" },
+            "FOUR_WHEELER":     { "active": "200", "hibernation": "10" },
+            "BUS":              { "active": "310", "hibernation": "10" }
+          }
+        }
+      ],
+      "challan_fetch_per_unit": "3",
+      "challan_free_per_asset_per_month": 1,
+      "google_map_hits_package_amount": "100",
+      "google_map_hits_package_size": 1000,
+      "tara_ai_package_amount": "500",
+      "tara_ai_package_size": 1000000
+    },
+    "TAPORQ03UH5": {
+      "label": "TRUST – Bansal Credits Limited",
+      "product": "TRUST",
+      "effective_from": "2026-04-01",
+      "asset_monthly": {
+        "TWO_WHEELER":   { "active": "25", "hibernation": "10" },
+        "THREE_WHEELER": { "active": "50", "hibernation": "10" },
+        "TRUCK":         { "active": "50", "hibernation": "10" }
+      },
+      "challan_fetch_per_unit": "3",
+      "challan_free_per_asset_per_month": 1,
+      "google_map_hits_package_amount": "100",
+      "google_map_hits_package_size": 1000,
+      "tara_ai_package_amount": "500",
+      "tara_ai_package_size": 1000000
+    }
+  }
+}
