@@ -34,6 +34,7 @@ import (
 	"github.com/flexprice/flexprice/internal/kafka"
 	"github.com/flexprice/flexprice/internal/logger"
 	"github.com/flexprice/flexprice/internal/pdf"
+	"github.com/flexprice/flexprice/internal/platformusage"
 	"github.com/flexprice/flexprice/internal/postgres"
 	"github.com/flexprice/flexprice/internal/publisher"
 	kafkaPubsub "github.com/flexprice/flexprice/internal/pubsub/kafka"
@@ -256,6 +257,14 @@ func main() {
 			activity.NewPublisher,
 			activity.NewLinkedCustomers,
 			activity.NewConsumer,
+		),
+	)
+
+	// Platform usage events consumer; inert unless platform_usage.enabled
+	opts = append(opts,
+		fx.Provide(
+			providePlatformUsagePubSub,
+			platformusage.NewConsumer,
 		),
 	)
 
@@ -676,6 +685,7 @@ func startServer(
 	rawEventConsumptionSvc service.RawEventConsumptionService,
 	meterUsageTrackingSvc service.MeterUsageTrackingService,
 	activityConsumer *activity.Consumer,
+	platformUsageConsumer *platformusage.Consumer,
 	params service.ServiceParams,
 ) {
 	mode := cfg.Deployment.Mode
@@ -691,7 +701,7 @@ func startServer(
 			log.Fatal(context.Background(), "Kafka consumer required for local mode")
 		}
 		// Register all handlers and start router once
-		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, cfg, true)
+		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, platformUsageConsumer, cfg, true)
 		startRouter(lc, router, log)
 		startTemporalWorker(lc, log, temporalClient, temporalService, params, webhookService)
 
@@ -699,7 +709,7 @@ func startServer(
 		startAPIServer(lc, r, cfg, log)
 	case types.ModeAPI:
 		// Register all handlers and start router once (no event consumption)
-		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, cfg, false)
+		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, platformUsageConsumer, cfg, false)
 		startRouter(lc, router, log)
 
 		// Registered last so fx's reverse-order stop drains HTTP before deps close.
@@ -709,7 +719,7 @@ func startServer(
 		// Register webhook handler and start router so that webhook events
 		// published by temporal activities (e.g. invoice finalization) are
 		// consumed and delivered via Svix/native in the same process.
-		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, cfg, false)
+		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, platformUsageConsumer, cfg, false)
 		startRouter(lc, router, log)
 		startTemporalWorker(lc, log, temporalClient, temporalService, params, webhookService)
 	case types.ModeConsumer:
@@ -718,7 +728,7 @@ func startServer(
 		}
 
 		// Register all handlers and start router once
-		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, cfg, true)
+		registerRouterHandlers(router, webhookService, integrationEventService, onboardingService, eventConsumptionSvc, costSheetUsageSvc, walletBalanceAlertSvc, rawEventConsumptionSvc, meterUsageTrackingSvc, activityConsumer, platformUsageConsumer, cfg, true)
 		startRouter(lc, router, log)
 	case types.ModeAdmin:
 		startAPIServer(lc, adminRouter, cfg, log)
@@ -830,6 +840,7 @@ func registerRouterHandlers(
 	rawEventConsumptionSvc service.RawEventConsumptionService,
 	meterUsageTrackingSvc service.MeterUsageTrackingService,
 	activityConsumer *activity.Consumer,
+	platformUsageConsumer *platformusage.Consumer,
 	cfg *config.Configuration,
 	includeProcessingHandlers bool,
 ) {
@@ -847,6 +858,7 @@ func registerRouterHandlers(
 		meterUsageTrackingSvc.RegisterHandlerLazy(router, cfg)
 		meterUsageTrackingSvc.RegisterBulkHandler(router, cfg)
 		activityConsumer.RegisterHandler(router, cfg)
+		platformUsageConsumer.RegisterHandler(router, cfg)
 	}
 }
 
@@ -886,6 +898,21 @@ func provideWalletBalanceAlertPubSub(
 		return types.WalletBalanceAlertPubSub{}
 	}
 	return types.WalletBalanceAlertPubSub{PubSub: pubSub}
+}
+
+func providePlatformUsagePubSub(
+	cfg *config.Configuration,
+	logger *logger.Logger,
+) types.PlatformUsagePubSub {
+	if !cfg.PlatformUsage.Enabled {
+		return types.PlatformUsagePubSub{}
+	}
+	pubSub, err := kafkaPubsub.NewPubSubFromConfig(platformusage.KafkaConfig(cfg), logger, cfg.PlatformUsage.ConsumerGroup)
+	if err != nil {
+		logger.Fatal(context.Background(), "failed to create pubsub for platform usage events", "error", err)
+		return types.PlatformUsagePubSub{}
+	}
+	return types.PlatformUsagePubSub{PubSub: pubSub}
 }
 
 func provideActivityPubSub(

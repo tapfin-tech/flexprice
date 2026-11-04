@@ -16,3 +16,8 @@ type IntegrationEventsPubSub struct {
 type ActivityPubSub struct {
 	pubsub.PubSub
 }
+
+// PlatformUsagePubSub carries the platform's usage events.
+type PlatformUsagePubSub struct {
+	pubsub.PubSub
+}
