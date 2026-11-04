@@ -68,6 +68,7 @@ type Configuration struct {
 	OAuth                  OAuthConfig                  `mapstructure:"oauth" validate:"required"`
 	WalletBalanceAlert     WalletBalanceAlertConfig     `mapstructure:"wallet_balance_alert" validate:"required"`
 	Activity               ActivityConfig               `mapstructure:"activity" validate:"omitempty"`
+	PlatformUsage          PlatformUsageConfig          `mapstructure:"platform_usage" validate:"omitempty"`
 	CustomerPortal         CustomerPortalConfig         `mapstructure:"customer_portal" validate:"required"`
 	Checkout               CheckoutConfig               `mapstructure:"checkout" validate:"omitempty"`
 	HostedInvoice          HostedInvoiceConfig          `mapstructure:"hosted_invoice" validate:"omitempty"`
@@ -1081,6 +1082,29 @@ type ActivityPublisherConfig struct {
 	ShutdownTimeout      time.Duration `mapstructure:"shutdown_timeout" default:"10s"`
 }
 
+// PlatformUsageConfig consumes the platform's billing-neutral usage events from Kafka and
+// ingests them as events of one tenant and environment; Enabled is the kill switch.
+type PlatformUsageConfig struct {
+	Enabled       bool   `mapstructure:"enabled" default:"false"`
+	Topic         string `mapstructure:"topic" default:"usage_events"`
+	TopicDLQ      string `mapstructure:"topic_dlq" default:"usage_events_dlq"`
+	ConsumerGroup string `mapstructure:"consumer_group" default:"platform_usage"`
+	TenantID      string `mapstructure:"tenant_id"`
+	EnvironmentID string `mapstructure:"environment_id"`
+	RateLimit     int64  `mapstructure:"rate_limit" default:"500"`
+	// Kafka points at the platform's cluster when it is not this deployment's own; empty brokers = own cluster.
+	Kafka PlatformUsageKafkaConfig `mapstructure:"kafka"`
+}
+
+type PlatformUsageKafkaConfig struct {
+	Brokers       []string             `mapstructure:"brokers"`
+	TLS           bool                 `mapstructure:"tls"`
+	UseSASL       bool                 `mapstructure:"use_sasl"`
+	SASLMechanism sarama.SASLMechanism `mapstructure:"sasl_mechanism"`
+	SASLUser      string               `mapstructure:"sasl_user"`
+	SASLPassword  string               `mapstructure:"sasl_password"`
+}
+
 type RawEventsReprocessingConfig struct {
 	Enabled     bool   `mapstructure:"enabled" default:"true"`
 	OutputTopic string `mapstructure:"output_topic" default:"prod_events_v4"`
@@ -1397,7 +1421,7 @@ const (
 // A non-local deployment booting with any of these for an ENABLED feature is running on a
 // public credential, so validateSecrets flags it (warn-only — see NewValidatedConfig).
 var placeholderSecrets = map[string]bool{
-	"": true, // unset
+	"":             true, // unset
 	"super_secret": true,
 	"dev-only-insecure-secret-prod-sets-FLEXPRICE_AUTH_SECRET": true,
 	"<supabase service key>":                                   true,
