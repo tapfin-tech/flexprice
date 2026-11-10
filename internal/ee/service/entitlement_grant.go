@@ -6,6 +6,11 @@ import (
 	"sort"
 	"time"
 
+	"github.com/flexprice/flexprice/internal/clock"
+
+	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
+
 	"github.com/flexprice/flexprice/internal/api/dto"
 	"github.com/flexprice/flexprice/internal/domain/customer"
 	"github.com/flexprice/flexprice/internal/domain/entitlement"
@@ -16,8 +21,6 @@ import (
 	"github.com/flexprice/flexprice/internal/domain/subscription"
 	ierr "github.com/flexprice/flexprice/internal/errors"
 	"github.com/flexprice/flexprice/internal/types"
-	"github.com/samber/lo"
-	"github.com/shopspring/decimal"
 )
 
 // EntitlementGrantService owns the lifecycle of entitlement_grants rows.
@@ -366,7 +369,7 @@ func (s *entitlementGrantService) OpenFeatureBasedEntitlementGrants(
 			WithEnvironmentID(types.GetEnvironmentID(ctx)).
 			WithBaseModel(types.GetDefaultBaseModel(ctx)).
 			Build()
-		grant, err := s.initializeRunningGrantUsage(ctx, grant, time.Now().UTC())
+		grant, err := s.initializeRunningGrantUsage(ctx, grant, clock.Now())
 		if err != nil {
 			return nil, err
 		}
@@ -1097,9 +1100,6 @@ func neverGrantShapeError(e *entitlement.Entitlement, m *meter.Meter) error {
 	if defaultedMode(e.AggregationMode) != types.EntitlementAggregationModeAdditive {
 		return ierr.NewError("parallel grants are not supported for NEVER meters").Mark(ierr.ErrValidation)
 	}
-	if e.EntityType == types.ENTITLEMENT_ENTITY_TYPE_ADDON {
-		return ierr.NewError("addon grants are not supported for NEVER meters").Mark(ierr.ErrValidation)
-	}
 	return nil
 }
 
@@ -1382,7 +1382,7 @@ func (s *entitlementService) takeOverGrantWindowsFromParent(ctx context.Context,
 		FeatureID:      e.FeatureID,
 		Delta:          delta,
 		Unlimited:      e.IsUnlimitedGrant(),
-		At:             time.Now().UTC(),
+		At:             clock.Now(),
 		Source:         "override_created",
 	})
 	return err
@@ -1413,7 +1413,7 @@ func (s *entitlementService) settleGrantWindowsForDeletedEC(ctx context.Context,
 			FeatureID:      e.FeatureID,
 			Delta:          delta,
 			Unlimited:      parent.IsUnlimitedGrant(),
-			At:             time.Now().UTC(),
+			At:             clock.Now(),
 			Source:         "override_removed",
 		})
 		return err
@@ -1437,7 +1437,7 @@ func (s *entitlementService) settleGrantWindowsForDeletedEC(ctx context.Context,
 		sub:                     sub,
 		entitlementsToRemove:    removed,
 		survivingECsByFeature:   surviving,
-		entitlementChangeAt:     time.Now().UTC(),
+		entitlementChangeAt:     clock.Now(),
 		entitlementChangeOrigin: grantProrationSourceEntitlementGone,
 	})
 }

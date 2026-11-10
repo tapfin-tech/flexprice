@@ -5,13 +5,16 @@ import (
 	"maps"
 	"time"
 
+	"github.com/flexprice/flexprice/internal/clock"
+
+	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
+
 	"github.com/flexprice/flexprice/internal/api/dto"
 	"github.com/flexprice/flexprice/internal/domain/price"
 	"github.com/flexprice/flexprice/internal/domain/subscription"
 	ierr "github.com/flexprice/flexprice/internal/errors"
 	"github.com/flexprice/flexprice/internal/types"
-	"github.com/samber/lo"
-	"github.com/shopspring/decimal"
 )
 
 // AddSubscriptionLineItem adds a new line item to an existing subscription
@@ -167,7 +170,7 @@ func (s *subscriptionService) addSubscriptionLineItem(ctx context.Context, subsc
 	// Apply proration for the add if requested. Skip usage prices (unknown future consumption).
 	if req.ProrationBehavior == types.ProrationBehaviorCreateProrations &&
 		lineItem.PriceType != types.PRICE_TYPE_USAGE {
-		effectiveDate := time.Now().UTC()
+		effectiveDate := clock.Now()
 		if req.StartDate != nil {
 			effectiveDate = req.StartDate.UTC()
 		}
@@ -390,7 +393,7 @@ func (s *subscriptionService) DeleteSubscriptionLineItem(ctx context.Context, li
 			Mark(ierr.ErrValidation)
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now()
 	if lineItem.StartDate.After(now) {
 		if req.EffectiveFrom != nil && req.EffectiveFrom.UTC().After(now) {
 			return nil, ierr.NewError("cannot schedule deletion of a line item that has not started").
@@ -454,28 +457,30 @@ func (s *subscriptionService) deleteSubscriptionLineItem(ctx context.Context, li
 	}
 
 	// Set end date and update
-	var effectiveFrom time.Time
+	var requested time.Time
 	if req.EffectiveFrom != nil {
-		effectiveFrom = req.EffectiveFrom.UTC()
+		requested = req.EffectiveFrom.UTC()
 	} else {
-		effectiveFrom = time.Now().UTC()
+		requested = clock.Now()
 	}
 
 	// Validate effective from date is on or after start date
-	if effectiveFrom.Before(lineItem.StartDate) {
+	if requested.Before(lineItem.StartDate) {
 		return nil, ierr.NewError("effective from date must be on or after start date").
 			WithHint("The effective from date must be on or after the line item's start date").
 			WithReportableDetails(map[string]interface{}{
 				"line_item_id":   lineItemID,
 				"start_date":     lineItem.StartDate,
-				"effective_from": effectiveFrom,
+				"effective_from": requested,
 			}).
 			Mark(ierr.ErrValidation)
 	}
 
-	if err := validateLineItemEndDateChange(lineItem, effectiveFrom); err != nil {
+	if err := validateLineItemEndDateChange(lineItem, requested); err != nil {
 		return nil, err
 	}
+
+	effectiveFrom := requested
 
 	// Capture a snapshot before mutating EndDate — the proration service uses EndDate==zero
 	// to distinguish "active recurring" from "onetime" (pre-existing EndDate at period boundary).
@@ -745,8 +750,7 @@ func (s *subscriptionService) UpdateSubscriptionLineItem(ctx context.Context, li
 			Mark(ierr.ErrValidation)
 	}
 
-	// Determine end date for existing line item
-	endDate := time.Now().UTC()
+	endDate := clock.Now()
 	if req.EffectiveFrom != nil {
 		endDate = req.EffectiveFrom.UTC()
 	}
@@ -1301,6 +1305,28 @@ func (s *subscriptionService) ListSubscriptionLineItems(ctx context.Context, fil
 			filter.GetLimit(),
 			filter.GetOffset(),
 		),
+	}, nil
+}
+
+func (s *subscriptionService) GetSubscriptionLineItemHistory(ctx context.Context, lineItemID string) (*dto.ListSubscriptionLineItemsResponse, error) {
+	if lineItemID == "" {
+		return nil, ierr.NewError("line_item_id is required").
+			WithHint("Line item ID is required").
+			Mark(ierr.ErrValidation)
+	}
+
+	items, err := s.SubscriptionLineItemRepo.ListLineage(ctx, lineItemID)
+	if err != nil {
+		return nil, err
+	}
+
+	responses := lo.Map(items, func(item *subscription.SubscriptionLineItem, _ int) *dto.SubscriptionLineItemResponse {
+		return &dto.SubscriptionLineItemResponse{SubscriptionLineItem: item}
+	})
+
+	return &dto.ListSubscriptionLineItemsResponse{
+		Items:      responses,
+		Pagination: types.NewPaginationResponse(len(responses), len(responses), 0),
 	}, nil
 }
 
