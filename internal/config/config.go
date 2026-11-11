@@ -538,8 +538,11 @@ type KafkaConfig struct {
 	// broker's advertised listener, which is correct almost always. Set it only
 	// when a private CA issues a certificate whose SAN does not match that name
 	// — a broker behind an SNI-mismatched load balancer, typically.
-	TLSServerName string               `mapstructure:"tls_server_name"`
-	UseSASL       bool                 `mapstructure:"use_sasl"`
+	TLSServerName string `mapstructure:"tls_server_name"`
+	UseSASL       bool   `mapstructure:"use_sasl"`
+	// SASLPlaintext sends SASL over a plain connection (SASL_PLAINTEXT) instead of
+	// the default SASL_SSL. Use it only for a broker reached over a private network.
+	SASLPlaintext bool                 `mapstructure:"sasl_plaintext"`
 	SASLMechanism sarama.SASLMechanism `mapstructure:"sasl_mechanism"`
 	SASLUser      string               `mapstructure:"sasl_user"`
 	SASLPassword  string               `mapstructure:"sasl_password"`
@@ -556,6 +559,12 @@ type KafkaConfig struct {
 	// (no merge) — see internal/kafka/topicspec.
 	TopicsDefaults KafkaTopicsDefaults       `mapstructure:"topics_defaults"`
 	Topics         map[string]KafkaTopicSpec `mapstructure:"topics"`
+}
+
+// UsesTLS reports whether the Kafka connection is encrypted: when tls is set, or
+// when SASL is on and sasl_plaintext is not.
+func (c *KafkaConfig) UsesTLS() bool {
+	return c.TLS || (c.UseSASL && !c.SASLPlaintext)
 }
 
 type KafkaTopicsDefaults struct {

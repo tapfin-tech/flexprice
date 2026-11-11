@@ -42,11 +42,9 @@ func GetSaramaConfig(cfg *config.Configuration) (*sarama.Config, error) {
 	// When rebalancing happens, use the last committed offset
 	saramaConfig.Consumer.Offsets.Retry.Max = 3
 
-	// SASL implies TLS: SASL_SSL is the only SASL protocol this app speaks, so
-	// enabling SASL turns TLS on even when cfg.Kafka.TLS is false. TLS material
-	// is built by the shared helper in internal/kafka so both config builders
-	// honour kafka.tls_ca_cert_file identically.
-	if cfg.Kafka.TLS || cfg.Kafka.UseSASL {
+	// SASL implies TLS (SASL_SSL) unless sasl_plaintext is set. TLS material is
+	// built by the shared helper in internal/kafka so both builders agree.
+	if cfg.Kafka.UsesTLS() {
 		tlsConfig, err := mainkafka.BuildTLSConfig(&cfg.Kafka)
 		if err != nil {
 			return nil, err
