@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 # Deploys one Flexprice image to the UAT host: migrations, Temporal namespace, then
 # the api / consumer / worker containers. Every step is idempotent and safe to re-run.
-# Usage: deploy.sh <image:tag> <env-file> <api-host-port>
+# Usage: deploy.sh <image:tag> <env-file> <api-host-port> [name-prefix]
+# The prefix names the containers; it defaults to the env file name (/tmp/flexprice-prod.env -> flexprice-prod).
 set -euo pipefail
 
 IMAGE="$1"
 ENV_FILE="$2"
 API_PORT="$3"
 
-NAME_PREFIX="flexprice-uat"
+NAME_PREFIX="${4:-$(basename "$ENV_FILE" .env)}"
+# Marks one-off containers so an aborted run can be cleaned up by label.
+ONEOFF_LABEL="$NAME_PREFIX.oneoff=true"
 PSQL_IMAGE="postgres:16-alpine"
 TEMPORAL_ADMIN_IMAGE="temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2"
 # Lets containers reach Postgres, Redis, ClickHouse, Kafka and Temporal published on this host.
 HOST_GATEWAY="--add-host=host.docker.internal:host-gateway"
 
+cleanup() {
+  docker ps -aq --filter "label=$ONEOFF_LABEL" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  rm -f "$ENV_FILE" "$0"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM HUP INT
+
 env_value() {
-  grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2-
+  { grep -E "^$1=" "$ENV_FILE" || true; } | tail -n1 | cut -d= -f2-
 }
 
 # Optional: comma-separated Docker networks to join (e.g. Kafka's and Temporal's) so
@@ -35,7 +45,7 @@ connect_extra_networks() {
 # Runs a one-off container to completion on all networks and returns its exit code.
 run_attached() {
   local id status=0
-  id="$(docker create $HOST_GATEWAY "$@")"
+  id="$(docker create --label "$ONEOFF_LABEL" $HOST_GATEWAY "$@")"
   connect_extra_networks "$id"
   timeout 300 docker start -a "$id" || status=$?
   docker rm -f "$id" >/dev/null 2>&1 || true
@@ -80,7 +90,7 @@ temporal_cli() {
 if temporal_cli operator namespace describe --namespace "$TEMPORAL_NAMESPACE" >/dev/null 2>&1; then
   echo "Namespace $TEMPORAL_NAMESPACE already exists"
 elif temporal_cli operator namespace create --namespace "$TEMPORAL_NAMESPACE" \
-    --retention "${TEMPORAL_RETENTION:-168h}" --description "Flexprice UAT"; then
+    --retention "${TEMPORAL_RETENTION:-168h}" --description "Flexprice $NAME_PREFIX"; then
   echo "Created namespace $TEMPORAL_NAMESPACE"
 else
   echo "Cannot reach Temporal at $TEMPORAL_ADDRESS (or namespace create failed)"
