@@ -1,31 +1,59 @@
 #!/usr/bin/env bash
 # Deploys one Flexprice image to the UAT host: migrations, Temporal namespace, then
 # the api / consumer / worker containers. Every step is idempotent and safe to re-run.
-# Usage: deploy.sh <image:tag> <env-file> <api-host-port>
+# Usage: deploy.sh <image:tag> <env-file> <api-host-port> [name-prefix]
+# The prefix names the containers; it defaults to the env file name (/tmp/flexprice-prod.env -> flexprice-prod).
 set -euo pipefail
 
 IMAGE="$1"
 ENV_FILE="$2"
 API_PORT="$3"
 
-NAME_PREFIX="flexprice-uat"
+NAME_PREFIX="${4:-$(basename "$ENV_FILE" .env)}"
+# Marks one-off containers so an aborted run can be cleaned up by label.
+ONEOFF_LABEL="$NAME_PREFIX.oneoff=true"
 PSQL_IMAGE="postgres:16-alpine"
 TEMPORAL_ADMIN_IMAGE="temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2"
 # Lets containers reach Postgres, Redis, ClickHouse, Kafka and Temporal published on this host.
 HOST_GATEWAY="--add-host=host.docker.internal:host-gateway"
 
+cleanup() {
+  docker ps -aq --filter "label=$ONEOFF_LABEL" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  rm -f "$ENV_FILE" "$0"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM HUP INT
+
 env_value() {
-  grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2-
+  { grep -E "^$1=" "$ENV_FILE" || true; } | tail -n1 | cut -d= -f2-
 }
 
-# Optional: join a Docker network (e.g. Kafka's) so its containers resolve by name.
-DOCKER_NETWORK="$(env_value DEPLOY_DOCKER_NETWORK)"
-if [ -n "$DOCKER_NETWORK" ]; then
-  HOST_GATEWAY="$HOST_GATEWAY --network $DOCKER_NETWORK"
+# Optional: comma-separated Docker networks to join (e.g. Kafka's and Temporal's) so
+# their containers resolve by name. The first is set at create, the rest connected after.
+IFS=',' read -r -a NETWORKS <<< "$(env_value DEPLOY_DOCKER_NETWORK | tr -d ' ')"
+if [ "${#NETWORKS[@]}" -gt 0 ]; then
+  HOST_GATEWAY="$HOST_GATEWAY --network ${NETWORKS[0]}"
 fi
 
+connect_extra_networks() {
+  local net
+  for net in "${NETWORKS[@]:1}"; do
+    docker network connect "$net" "$1"
+  done
+}
+
+# Runs a one-off container to completion on all networks and returns its exit code.
+run_attached() {
+  local id status=0
+  id="$(docker create --label "$ONEOFF_LABEL" $HOST_GATEWAY "$@")"
+  connect_extra_networks "$id"
+  timeout 300 docker start -a "$id" || status=$?
+  docker rm -f "$id" >/dev/null 2>&1 || true
+  return "$status"
+}
+
 run_once() {
-  docker run --rm $HOST_GATEWAY --env-file "$ENV_FILE" "$@"
+  run_attached --env-file "$ENV_FILE" "$@"
 }
 
 echo "=== Pull $IMAGE ==="
@@ -56,13 +84,13 @@ if [ "$(env_value FLEXPRICE_TEMPORAL_TLS)" = "true" ]; then
   TEMPORAL_TLS_FLAG="--tls"
 fi
 temporal_cli() {
-  timeout 60 docker run --rm $HOST_GATEWAY --entrypoint temporal "$TEMPORAL_ADMIN_IMAGE" \
+  run_attached --entrypoint temporal "$TEMPORAL_ADMIN_IMAGE" --command-timeout 30s \
     --address "$TEMPORAL_ADDRESS" $TEMPORAL_TLS_FLAG "$@"
 }
 if temporal_cli operator namespace describe --namespace "$TEMPORAL_NAMESPACE" >/dev/null 2>&1; then
   echo "Namespace $TEMPORAL_NAMESPACE already exists"
 elif temporal_cli operator namespace create --namespace "$TEMPORAL_NAMESPACE" \
-    --retention "${TEMPORAL_RETENTION:-168h}" --description "Flexprice UAT"; then
+    --retention "${TEMPORAL_RETENTION:-168h}" --description "Flexprice $NAME_PREFIX"; then
   echo "Created namespace $TEMPORAL_NAMESPACE"
 else
   echo "Cannot reach Temporal at $TEMPORAL_ADDRESS (or namespace create failed)"
@@ -74,7 +102,7 @@ replace_container() {
   shift 2
   local name="$NAME_PREFIX-$role"
   docker rm -f "$name" >/dev/null 2>&1 || true
-  docker run -d \
+  docker create \
     --name "$name" \
     --restart unless-stopped \
     $HOST_GATEWAY \
@@ -82,7 +110,9 @@ replace_container() {
     -e FLEXPRICE_DEPLOYMENT_MODE="$mode" \
     --log-opt max-size=50m --log-opt max-file=5 \
     "$@" \
-    "$IMAGE"
+    "$IMAGE" >/dev/null
+  connect_extra_networks "$name"
+  docker start "$name" >/dev/null
   echo "Started $name ($mode)"
 }
 
